@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#0e1a34"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101c3a"/>
+      <stop offset="1" stop-color="#0e1730"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="675" rx="36" fill="url(#bg)"/>
+
+  <!-- Reader surface -->
+  <rect x="64" y="56" width="1072" height="568" rx="28" fill="#0e1730" opacity="0.92"/>
+  <rect x="96" y="92" width="700" height="500" rx="24" fill="#f3f4f6"/>
+  <rect x="128" y="132" width="636" height="14" rx="7" fill="#9ca3af"/>
+  <rect x="128" y="160" width="612" height="14" rx="7" fill="#9ca3af"/>
+  <rect x="128" y="188" width="640" height="14" rx="7" fill="#9ca3af"/>
+  <rect x="128" y="240" width="580" height="14" rx="7" fill="#9ca3af"/>
+  <rect x="128" y="268" width="636" height="14" rx="7" fill="#9ca3af"/>
+
+  <!-- Sidebar panel -->
+  <rect x="816" y="92" width="288" height="500" rx="24" fill="url(#panel)" stroke="#2a3a66"/>
+
+  <text x="848" y="134" fill="#e8eeff" font-family="ui-sans-serif, system-ui" font-size="18" font-weight="800">Search</text>
+  <rect x="848" y="152" width="224" height="34" rx="14" fill="#0b1220" opacity="0.6"/>
+  <text x="864" y="174" fill="#b8c4ff" font-family="ui-sans-serif, system-ui" font-size="12">Type to search…</text>
+
+  <!-- Results -->
+  <rect x="848" y="206" width="224" height="54" rx="16" fill="#0b1220" opacity="0.55"/>
+  <rect x="860" y="224" width="200" height="10" rx="5" fill="#e8eeff" opacity="0.9"/>
+  <rect x="860" y="242" width="172" height="10" rx="5" fill="#b8c4ff" opacity="0.65"/>
+
+  <rect x="848" y="270" width="224" height="54" rx="16" fill="#0b1220" opacity="0.55"/>
+  <rect x="860" y="288" width="192" height="10" rx="5" fill="#e8eeff" opacity="0.9"/>
+  <rect x="860" y="306" width="160" height="10" rx="5" fill="#b8c4ff" opacity="0.65"/>
+
+  <text x="848" y="368" fill="#e8eeff" font-family="ui-sans-serif, system-ui" font-size="18" font-weight="800">Audio</text>
+  <rect x="848" y="388" width="224" height="70" rx="18" fill="#0b1220" opacity="0.55"/>
+  <circle cx="884" cy="423" r="16" fill="#4f46e5"/>
+  <polygon points="878,414 878,432 894,423" fill="#ffffff"/>
+  <rect x="912" y="418" width="152" height="10" rx="5" fill="#b8c4ff" opacity="0.7"/>
+  <rect x="912" y="438" width="120" height="10" rx="5" fill="#b8c4ff" opacity="0.5"/>
+
+  <text x="64" y="652" fill="#9fb0ff" font-family="ui-sans-serif, system-ui" font-size="14">Illustration (SVG) — search highlights + browser read-aloud controls.</text>
+</svg>
