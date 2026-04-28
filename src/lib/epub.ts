@@ -105,7 +105,7 @@ function buildTocNavigation(
   spine: any,
   spineByHref: Map<string, number>,
 ): ChapterEntry[] {
-  const entries: Array<ChapterEntry & { rawLabel: string }> = [];
+  const entries: ChapterEntry[] = [];
   const seen = new Set<string>();
 
   for (const item of flatToc) {
@@ -124,33 +124,21 @@ function buildTocNavigation(
     }
 
     seen.add(dedupeKey);
-    const rawLabel = (item.label || `Chapter ${entries.length + 1}`).trim();
     entries.push({
       key: target,
       href: target,
       spineIndex,
       level: item.level || 0,
-      label: rawLabel,
-      rawLabel,
+      label: `${entries.length + 1}. ${item.label || `Chapter ${entries.length + 1}`}`,
     });
   }
 
-  entries.sort((left, right) => (left.spineIndex || 0) - (right.spineIndex || 0));
-
-  // Decide whether to auto-number: only when the TOC is flat AND labels look like generic
-  // "Chapter N" stubs. A hierarchical TOC (any level > 0) or self-numbered labels
-  // ("Genesis 1", "John 3:16", "1.2 Foundations") get rendered as-is.
-  const hasHierarchy = entries.some((entry) => (entry.level || 0) > 0);
-  const labelsLookSelfNumbered = entries.some((entry) => /^[\dIVXLCDM]+[.:\s)]/i.test(entry.rawLabel));
-  const shouldAutoNumber = !hasHierarchy && !labelsLookSelfNumbered;
-
-  return entries.map((entry, index) => ({
-    key: entry.key,
-    href: entry.href,
-    spineIndex: entry.spineIndex,
-    level: entry.level,
-    label: shouldAutoNumber ? `${index + 1}. ${entry.rawLabel}` : entry.rawLabel,
-  }));
+  return entries
+    .sort((left, right) => (left.spineIndex || 0) - (right.spineIndex || 0))
+    .map((entry, index) => ({
+      ...entry,
+      label: entry.label.replace(/^\d+\.\s*/, `${index + 1}. `),
+    }));
 }
 
 function buildSpineLookup(spine: any): Map<string, number> {
