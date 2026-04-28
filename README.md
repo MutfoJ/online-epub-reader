@@ -4,7 +4,7 @@ Online EPUB Reader is a local-first browser app for reading EPUB and TXT novels 
 
 Live version:
 
-- https://local-epub-reader.vercel.app
+- https://novel-epub-reader.vercel.app
 
 ## What it does
 
