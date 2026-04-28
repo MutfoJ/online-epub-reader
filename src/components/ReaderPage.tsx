@@ -63,6 +63,7 @@ export function ReaderPage() {
   const [fileBlob, setFileBlob] = useState<Blob | null>(null);
   const [fileBlobError, setFileBlobError] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelName>(null);
+  const [tocFilter, setTocFilter] = useState("");
   const [readerState, setReaderState] = useState<ReaderState>(() => initialReaderState(book));
   const [speechSupported] = useState(
     typeof window !== "undefined" && "speechSynthesis" in window && "SpeechSynthesisUtterance" in window,
@@ -187,6 +188,10 @@ export function ReaderPage() {
       readerRef.current?.clearSearchHighlights?.();
     }
   }, [panel]);
+
+  useEffect(() => {
+    setTocFilter("");
+  }, [book?.id]);
 
   const handleReaderStateChange = useCallback(
     (payload: {
@@ -593,16 +598,53 @@ export function ReaderPage() {
     }
   };
 
+  const tocHasHierarchy = sectionEntries.some((entry) => (entry.level || 0) > 0);
+  const filterNeedle = tocFilter.trim().toLowerCase();
+  const filteredTocEntries = filterNeedle
+    ? sectionEntries
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => entry.label.toLowerCase().includes(filterNeedle))
+    : sectionEntries.map((entry, index) => ({ entry, index }));
+
   const chaptersPanelContent = (
     <ReaderPanelCard eyebrow="Navigation" title="Contents" onClose={() => setPanel(null)}>
+      {sectionEntries.length > 12 ? (
+        <div className="chapter-filter">
+          <input
+            type="search"
+            value={tocFilter}
+            onChange={(event) => setTocFilter(event.target.value)}
+            placeholder={`Filter ${sectionEntries.length} chapters…`}
+            aria-label="Filter chapters"
+            className="chapter-filter-input"
+          />
+          {filterNeedle ? (
+            <button
+              type="button"
+              className="chapter-filter-clear"
+              onClick={() => setTocFilter("")}
+              aria-label="Clear filter"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="chapter-list" role="listbox" aria-label="Chapters">
-        {sectionEntries.map((entry, index) => {
+        {filteredTocEntries.length === 0 ? (
+          <div className="chapter-empty">No chapters match "{tocFilter}".</div>
+        ) : null}
+        {filteredTocEntries.map(({ entry, index }) => {
           const isActive = index === currentSectionIndex;
           const imageBadge = entry.imageCount && entry.imageCount > 0 ? entry.imageCount : null;
+          // When the TOC is hierarchical and we have no filter applied, treat level-0 entries
+          // as visual section headers (still clickable, but rendered differently).
+          const isSectionHeader = !filterNeedle && tocHasHierarchy && (entry.level || 0) === 0;
+          const indentLevel = filterNeedle ? 0 : Math.min(3, entry.level || 0);
           return (
             <button
               key={entry.key}
-              className={`chapter-row ${isActive ? "is-active" : ""} ${entry.hasImages ? "has-images" : ""}`}
+              className={`chapter-row ${isActive ? "is-active" : ""} ${entry.hasImages ? "has-images" : ""} ${isSectionHeader ? "is-section-header" : ""}`}
               disabled={!readerReady || isNavigatingSection}
               onClick={() => void goToSection(index)}
               title={
@@ -613,7 +655,7 @@ export function ReaderPage() {
               role="option"
               aria-selected={isActive}
               aria-current={isActive ? "true" : undefined}
-              style={{ paddingLeft: `${14 + Math.min(3, entry.level || 0) * 14}px` }}
+              style={{ paddingLeft: `${14 + indentLevel * 14}px` }}
             >
               <span className="chapter-row-label">{entry.label}</span>
               {entry.hasImages ? (
