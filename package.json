@@ -5,7 +5,7 @@
   "homepage": "https://local-epub-reader.vercel.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZeroInfinit12000/online-epub-reader.git"
+    "url": "https://github.com/MutfoJ/online-epub-reader.git"
   },
   "scripts": {
     "dev": "vite",
