@@ -31,6 +31,38 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+// Strip XHTML/HTML to plain text via regex — far cheaper than DOMParser when we only
+// need text for word counting or substring search. Removes <script>/<style> *content*,
+// then all tags, then decodes the handful of HTML entities EPUBs actually use.
+const SCRIPT_OR_STYLE_PATTERN = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const TAG_PATTERN = /<[^>]+>/g;
+const ENTITY_PATTERN = /&(amp|lt|gt|quot|apos|nbsp|#39|#x27|#x2f|#47);/gi;
+const ENTITY_MAP: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  "#39": "'",
+  "#x27": "'",
+  "#x2f": "/",
+  "#47": "/",
+};
+const NUMERIC_ENTITY_PATTERN = /&#(\d+);|&#x([0-9a-f]+);/gi;
+
+export function stripHtml(raw: string): string {
+  if (!raw) return "";
+  let out = raw.replace(SCRIPT_OR_STYLE_PATTERN, " ");
+  out = out.replace(TAG_PATTERN, " ");
+  out = out.replace(ENTITY_PATTERN, (_match, key) => ENTITY_MAP[String(key).toLowerCase()] ?? " ");
+  out = out.replace(NUMERIC_ENTITY_PATTERN, (_match, dec, hex) => {
+    const code = dec ? parseInt(dec, 10) : parseInt(hex, 16);
+    return Number.isFinite(code) && code > 0 && code < 0x10ffff ? String.fromCodePoint(code) : " ";
+  });
+  return out;
+}
+
 export function normalizeSpeechText(value: string): string {
   return String(value || "")
     .replaceAll("\u00a0", " ")

@@ -18,7 +18,7 @@ import {
   hrefsMatchFile,
   loadEpubFactory,
 } from "../lib/epub";
-import { normalizeSpeechText, splitParagraphIntoSentences } from "../lib/helpers";
+import { normalizeSpeechText, splitParagraphIntoSentences, stripHtml } from "../lib/helpers";
 import { loadEpubLocations, saveEpubLocations } from "../lib/storage";
 import type { ChapterEntry, EpubBook, ReaderHandle, ReaderSettings, SearchResult, SpeechSource } from "../types";
 
@@ -540,7 +540,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
       searchBook: async (query: string) => {
         const needle = query.trim();
         if (needle.length < 2) return [];
-        return searchEpubBlob(fileBlob, chaptersRef.current, needle);
+        return searchEpubBlob(fileBlob, chaptersRef.current, needle, book.id);
       },
       goToSearchResult: async (result: SearchResult) => {
         activeSearchQueryRef.current = result.matchText || "";
@@ -845,68 +845,103 @@ async function hydrateLocations(epub: any, bookId: string, fileSize: number): Pr
   }
 }
 
-async function searchEpubBlob(fileBlob: Blob, chapters: ChapterEntry[], query: string): Promise<SearchResult[]> {
-  const needle = query.trim().toLowerCase();
-  if (needle.length < 2) return [];
+// Per-book search-text cache. First query for a book pays the decode + strip cost; every
+// subsequent query reuses the lowercased text. Cleared when a different book is opened.
+let searchCacheBookId: string | null = null;
+let searchCacheChapters: Array<{ index: number; href: string; label: string; text: string; lowerText: string }> | null =
+  null;
 
-  const results: SearchResult[] = [];
-  const seen = new Set<string>();
+async function buildSearchCache(
+  fileBlob: Blob,
+  chapters: ChapterEntry[],
+): Promise<NonNullable<typeof searchCacheChapters>> {
   const reader = new ZipReader(new BlobReader(fileBlob));
-
+  const built: NonNullable<typeof searchCacheChapters> = [];
   try {
     const entries = await reader.getEntries();
-    for (const [sectionIndex, chapter] of chapters.entries()) {
-      if (results.length >= 120) break;
-      const href = chapter.href || chapter.key;
-      const entry = findEpubEntryForHref(entries, href);
-      if (!entry?.getData) continue;
+    const entryByPath = new Map<string, any>();
+    for (const entry of entries) {
+      if (!entry.directory) {
+        entryByPath.set(entry.filename.replace(/\\/g, "/").toLowerCase(), entry);
+      }
+    }
+    const lookupEntry = (href: string) => {
+      const target = href.split("#")[0].replace(/\\/g, "/").replace(/^\.?\//, "").toLowerCase();
+      const direct = entryByPath.get(target);
+      if (direct) return direct;
+      for (const [filename, entry] of entryByPath) {
+        if (filename === target || filename.endsWith(`/${target}`)) return entry;
+      }
+      return null;
+    };
 
+    for (let i = 0; i < chapters.length; i += 1) {
+      const chapter = chapters[i];
+      const href = chapter.href || chapter.key;
+      const entry = lookupEntry(href);
+      if (!entry?.getData) continue;
       try {
         const raw = await entry.getData(new TextWriter());
-        const doc = new DOMParser().parseFromString(raw, "application/xhtml+xml");
-        const text = normalizeSpeechText(doc?.body?.textContent || "");
+        const text = normalizeSpeechText(stripHtml(raw));
         if (!text) continue;
-
-        let fromIndex = 0;
-        const lower = text.toLowerCase();
-        while (results.length < 120) {
-          const matchIndex = lower.indexOf(needle, fromIndex);
-          if (matchIndex < 0) break;
-
-          const id = `${sectionIndex}:${matchIndex}`;
-          if (!seen.has(id)) {
-            const start = Math.max(0, matchIndex - 80);
-            const end = Math.min(text.length, matchIndex + needle.length + 110);
-            results.push({
-              id,
-              sectionIndex,
-              sectionLabel: chapter.label.replace(/^\d+\.\s*/, ""),
-              excerpt: `${start > 0 ? "..." : ""}${text.slice(start, end).trim()}${end < text.length ? "..." : ""}`,
-              matchText: text.slice(matchIndex, matchIndex + needle.length),
-              source: href,
-            });
-            seen.add(id);
-          }
-
-          fromIndex = matchIndex + Math.max(1, needle.length);
-        }
+        built.push({
+          index: i,
+          href,
+          label: chapter.label.replace(/^\d+\.\s*/, ""),
+          text,
+          lowerText: text.toLowerCase(),
+        });
       } catch {
-        /* Skip entries that cannot be read as text. */
+        /* skip unreadable */
+      }
+      // Yield every 25 chapters so a giant book doesn't freeze the UI.
+      if ((i + 1) % 25 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
   } finally {
     await reader.close().catch(() => {});
   }
-
-  return results;
+  return built;
 }
 
-function findEpubEntryForHref(entries: any[], href: string) {
-  const target = href.split("#")[0].replace(/\\/g, "/").replace(/^\.?\//, "").toLowerCase();
-  return entries.find((entry) => {
-    const filename = entry.filename.replace(/\\/g, "/").toLowerCase();
-    return filename === target || filename.endsWith(`/${target}`);
-  });
+async function searchEpubBlob(
+  fileBlob: Blob,
+  chapters: ChapterEntry[],
+  query: string,
+  bookId: string,
+): Promise<SearchResult[]> {
+  const needle = query.trim().toLowerCase();
+  if (needle.length < 2) return [];
+
+  if (searchCacheBookId !== bookId || !searchCacheChapters) {
+    searchCacheChapters = await buildSearchCache(fileBlob, chapters);
+    searchCacheBookId = bookId;
+  }
+
+  const results: SearchResult[] = [];
+  const needleLength = Math.max(1, needle.length);
+
+  for (const cached of searchCacheChapters) {
+    if (results.length >= 120) break;
+    let fromIndex = 0;
+    while (results.length < 120) {
+      const matchIndex = cached.lowerText.indexOf(needle, fromIndex);
+      if (matchIndex < 0) break;
+      const start = Math.max(0, matchIndex - 80);
+      const end = Math.min(cached.text.length, matchIndex + needle.length + 110);
+      results.push({
+        id: `${cached.index}:${matchIndex}`,
+        sectionIndex: cached.index,
+        sectionLabel: cached.label,
+        excerpt: `${start > 0 ? "..." : ""}${cached.text.slice(start, end).trim()}${end < cached.text.length ? "..." : ""}`,
+        matchText: cached.text.slice(matchIndex, matchIndex + needle.length),
+        source: cached.href,
+      });
+      fromIndex = matchIndex + needleLength;
+    }
+  }
+  return results;
 }
 
 function buildSpeechCandidates(root: HTMLElement): EpubSpeechCandidate[] {

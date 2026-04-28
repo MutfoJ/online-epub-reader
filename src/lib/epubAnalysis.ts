@@ -1,6 +1,6 @@
 import { BlobReader, BlobWriter, TextWriter, ZipReader } from "@zip.js/zip.js";
 
-import { buildBookStats, countWords } from "./helpers";
+import { buildBookStats, countWords, stripHtml } from "./helpers";
 import { normalizeFileHref } from "./epub";
 import type { BookStats } from "../types";
 
@@ -87,28 +87,15 @@ async function extractCover(entries: any[], password?: string): Promise<string |
   }
 }
 
-function parseChapterDocument(raw: string): { wordCount: number; imageCount: number } | null {
-  try {
-    const xml = new DOMParser().parseFromString(raw, "application/xhtml+xml");
-    if (!xml.querySelector("parsererror")) {
-      return summarizeDocument(xml);
-    }
-  } catch {
-    /* fall through to HTML */
-  }
-  try {
-    const html = new DOMParser().parseFromString(raw, "text/html");
-    return summarizeDocument(html);
-  } catch {
-    return null;
-  }
-}
+// Cheap analysis pass: count images by tag-presence regex, count words from regex-stripped
+// text. Avoids the per-chapter DOMParser allocation that dominated import time on big EPUBs.
+const IMAGE_TAG_PATTERN = /<(?:img|image|svg)\b/gi;
 
-function summarizeDocument(doc: Document): { wordCount: number; imageCount: number } {
-  const body = doc.body || doc.documentElement;
-  if (!body) return { wordCount: 0, imageCount: 0 };
-  const imageCount = body.querySelectorAll("img, image, svg").length;
-  const text = (body.textContent || "").trim();
+function parseChapterDocument(raw: string): { wordCount: number; imageCount: number } | null {
+  if (!raw) return null;
+  let imageCount = 0;
+  for (const _ of raw.matchAll(IMAGE_TAG_PATTERN)) imageCount += 1;
+  const text = stripHtml(raw);
   return { wordCount: countWords(text), imageCount };
 }
 
