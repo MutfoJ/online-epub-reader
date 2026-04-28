@@ -15,13 +15,17 @@ Local-first EPUB/TXT reader that runs **entirely in your browser**. Import books
 
 ## Screenshots
 
-> These are lightweight SVG “screenshots” stored in the repo so they always render on GitHub. If you want, you can replace them later with real PNG screenshots (same paths).
+Real screenshots (PNG) from the live app:
 
-![Library](docs/screenshots/library.svg)
+![Library](docs/screenshots/library.png)
 
-![Reader](docs/screenshots/reader.svg)
+![Reader](docs/screenshots/reader.png)
 
-![Search and read-aloud](docs/screenshots/search-audio.svg)
+![Search](docs/screenshots/search.png)
+
+![Audio controls](docs/screenshots/audio.png)
+
+> The repo also includes SVG “mock screenshots” in the same folder as a lightweight fallback.
 
 ## Table of contents
 
