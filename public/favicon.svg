@@ -1,7 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#f1dcc0" />
-  <path
-    d="M17 18c0-2.2 1.8-4 4-4h10c4.5 0 8.2 1.1 11 3.2 2.7-2.1 6.3-3.2 11-3.2h1v32h-1c-4.9 0-8.5 1.1-11 3.3-2.5-2.2-6.1-3.3-11-3.3H21c-2.2 0-4-1.8-4-4V18Zm4 0v24h10.4c3.6 0 6.3.6 8.6 1.9V20.8c-2.3-1.9-5.2-2.8-9-2.8H21Zm23-1.9c-3.8 0-6.7.9-9 2.8V43.9c2.3-1.3 5-1.9 8.6-1.9H49V16.1h-5Z"
-    fill="#9b461c"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  <rect width="100" height="100" rx="24" fill="url(#bg)" />
+  <path d="M28 32 C28 27.5817 31.5817 24 36 24 C41.6067 24 47.242 25.597 50 28 C52.758 25.597 58.3933 24 64 24 C68.4183 24 72 27.5817 72 32 V68 C72 69.1046 71.1046 70 70 70 C65.5817 70 60.597 68.403 55 66 C52.242 64.7985 50.8 63 50 63 C49.2 63 47.758 64.7985 45 66 C39.403 68.403 34.4183 70 30 70 C28.8954 70 28 69.1046 28 68 V32 Z" fill="#FFFFFF" filter="url(#shadow)" />
+  <path d="M50 28 V63" stroke="#E0E7FF" stroke-width="2" stroke-linecap="round" />
+  <path d="M34 38 H44" stroke="#E0E7FF" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M34 48 H44" stroke="#E0E7FF" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M56 38 H66" stroke="#E0E7FF" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M56 48 H66" stroke="#E0E7FF" stroke-width="2.5" stroke-linecap="round" />
 </svg>
