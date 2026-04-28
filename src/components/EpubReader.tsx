@@ -50,6 +50,7 @@ interface PendingNavigation {
 
 const PENDING_NAV_TIMEOUT_MS = 2500;
 const RELOCATED_DEBOUNCE_PERSIST_MS = 650;
+const USER_SCROLL_GRACE_MS = 1500;
 
 export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function EpubReader(
   { book, fileBlob, settings, onUpdate, onReaderStateChange },
@@ -72,6 +73,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
   const lastSavedReadingRef = useRef<string>("");
   const lastRelocatedCfiRef = useRef<string | null>(book.reading.cfi || null);
   const contentTeardownsRef = useRef<Array<() => void>>([]);
+  const lastUserScrollAtRef = useRef<number>(0);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState(book.reading.chapterIndex || 0);
   const [progressLabel, setProgressLabel] = useState(
@@ -217,7 +219,9 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
 
       rendition.hooks.content.register((contents: any) => {
         applyReaderStyles(contents, settingsRef.current, getEpubThemeStyles(settingsRef.current));
-        const teardown = bridgeContentScroll(contents);
+        const teardown = bridgeContentScroll(contents, () => {
+          lastUserScrollAtRef.current = performance.now();
+        });
         if (teardown) contentTeardownsRef.current.push(teardown);
       });
 
@@ -346,11 +350,38 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
   }, [book.id, fileBlob, settings.flow, flushPersistTimer, queuePersistReading]);
 
   // Re-apply styles in place whenever theme/typography changes, without rebuilding the rendition.
+  // Snapshot iframe scroll position before the style mutation so reflow doesn't visibly jump.
   useEffect(() => {
     const contentsList = renditionRef.current?.getContents?.() || [];
+    const snapshots = contentsList.map((contents: any) => ({
+      contents,
+      scrollY: Math.max(
+        0,
+        contents?.window?.scrollY ||
+          contents?.document?.documentElement?.scrollTop ||
+          0,
+      ),
+    }));
     for (const contents of contentsList) {
       applyReaderStyles(contents, settings, themeStyles);
     }
+    // Restore on the next two frames — first frame applies layout, second frame is when
+    // the new line metrics are settled enough to land within a pixel.
+    const restore = () => {
+      for (const snap of snapshots) {
+        if (!snap.scrollY) continue;
+        try {
+          snap.contents?.window?.scrollTo?.(0, snap.scrollY);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    const raf1 = window.requestAnimationFrame(() => {
+      restore();
+      window.requestAnimationFrame(restore);
+    });
+    return () => window.cancelAnimationFrame(raf1);
   }, [settings, themeStyles, ready]);
 
   // Cleanup persist timer on unmount.
@@ -501,6 +532,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
             highlightSentenceWithinBlock(candidate.block, candidate.text, doc);
           },
           scrollIntoView: () => {
+            if (performance.now() - lastUserScrollAtRef.current < USER_SCROLL_GRACE_MS) return;
             candidate.block.scrollIntoView({ block: "center", behavior: "smooth" });
           },
         }));
@@ -584,7 +616,7 @@ async function waitForRenditionContents(rendition: any): Promise<boolean> {
   return false;
 }
 
-function bridgeContentScroll(contents: any): (() => void) | null {
+function bridgeContentScroll(contents: any, onUserScroll?: () => void): (() => void) | null {
   const contentWindow = contents.window as Window | undefined;
   const doc = contents.document as Document | undefined;
   if (!contentWindow || !doc?.documentElement) return null;
@@ -616,11 +648,20 @@ function bridgeContentScroll(contents: any): (() => void) | null {
     }
   };
 
+  // Distinguish user-initiated scrolls from programmatic ones by listening to input events.
+  const noteUserInput = () => onUserScroll?.();
+
   contentWindow.addEventListener("scroll", handleScroll, { passive: true });
+  contentWindow.addEventListener("wheel", noteUserInput, { passive: true });
+  contentWindow.addEventListener("touchstart", noteUserInput, { passive: true });
+  contentWindow.addEventListener("keydown", noteUserInput);
 
   return () => {
     try {
       contentWindow.removeEventListener("scroll", handleScroll);
+      contentWindow.removeEventListener("wheel", noteUserInput);
+      contentWindow.removeEventListener("touchstart", noteUserInput);
+      contentWindow.removeEventListener("keydown", noteUserInput);
     } catch {
       /* ignore */
     }
@@ -848,12 +889,20 @@ function highlightSentenceWithinBlock(block: HTMLElement, text: string, doc: Doc
   marker.className = "speech-active";
   marker.appendChild(extracted);
   range.insertNode(marker);
+  // Wrapping the range mutates text nodes — drop the cache so the next call rebuilds.
+  blockTextIndexCache.delete(block);
 }
 
-function findRangeInElement(element: HTMLElement, text: string, doc: Document): Range | null {
-  const normalizedTarget = normalizeSpeechText(text).toLowerCase();
-  if (!normalizedTarget) return null;
+interface BlockTextIndex {
+  combined: string;
+  positions: Array<{ node: Text; offset: number }>;
+}
 
+// Position maps are reused across every sentence highlight within a block, so cache them
+// against the element identity. WeakMap entries vanish automatically when the iframe unloads.
+const blockTextIndexCache = new WeakMap<HTMLElement, BlockTextIndex>();
+
+function buildBlockTextIndex(element: HTMLElement, doc: Document): BlockTextIndex {
   const walker = doc.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       return node.nodeValue?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
@@ -870,7 +919,8 @@ function findRangeInElement(element: HTMLElement, text: string, doc: Document): 
     const raw = textNode.nodeValue || "";
     for (let index = 0; index < raw.length; index += 1) {
       const character = raw[index];
-      if (/\s/.test(character)) {
+      const isSpace = character === " " || character === "\t" || character === "\n" || character === "\r";
+      if (isSpace) {
         if (!previousWasSpace) {
           combined += " ";
           positions.push({ node: textNode, offset: index });
@@ -883,12 +933,24 @@ function findRangeInElement(element: HTMLElement, text: string, doc: Document): 
       }
     }
   }
+  return { combined, positions };
+}
 
-  const startIndex = combined.indexOf(normalizedTarget);
+function findRangeInElement(element: HTMLElement, text: string, doc: Document): Range | null {
+  const normalizedTarget = normalizeSpeechText(text).toLowerCase();
+  if (!normalizedTarget) return null;
+
+  let index = blockTextIndexCache.get(element);
+  if (!index) {
+    index = buildBlockTextIndex(element, doc);
+    blockTextIndexCache.set(element, index);
+  }
+
+  const startIndex = index.combined.indexOf(normalizedTarget);
   if (startIndex < 0) return null;
 
-  const start = positions[startIndex];
-  const end = positions[startIndex + normalizedTarget.length - 1];
+  const start = index.positions[startIndex];
+  const end = index.positions[startIndex + normalizedTarget.length - 1];
   if (!start || !end) return null;
 
   const range = doc.createRange();

@@ -102,9 +102,9 @@ async function buildBookRecord(
 ): Promise<LibraryBook> {
   const id = crypto.randomUUID();
   const importedAt = new Date().toISOString();
-  const blob = new Blob([await file.arrayBuffer()], {
-    type: file.type || guessMimeFromName(file.name),
-  });
+  // A File is already a Blob — re-type without copying the bytes via slice().
+  const desiredType = file.type || guessMimeFromName(file.name);
+  const blob: Blob = file.type === desiredType ? file : file.slice(0, file.size, desiredType);
 
   if (type === "txt") {
     const text = await blob.text();

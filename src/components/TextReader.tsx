@@ -36,6 +36,21 @@ export const TextReader = forwardRef<ReaderHandle, TextReaderProps>(function Tex
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const sectionIndexRef = useRef(sectionIndex);
   const bookIdRef = useRef(book.id);
+  const lastUserScrollAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    const note = () => {
+      lastUserScrollAtRef.current = performance.now();
+    };
+    window.addEventListener("wheel", note, { passive: true });
+    window.addEventListener("touchstart", note, { passive: true });
+    window.addEventListener("keydown", note);
+    return () => {
+      window.removeEventListener("wheel", note);
+      window.removeEventListener("touchstart", note);
+      window.removeEventListener("keydown", note);
+    };
+  }, []);
 
   // Reset only when the book identity actually changes — *not* on every persisted reading echo.
   // (Listening to book.reading.sectionIndex caused a race where a stale onUpdate could clobber
@@ -206,6 +221,7 @@ export const TextReader = forwardRef<ReaderHandle, TextReaderProps>(function Tex
               element?.classList.add("sentence-active");
             },
             scrollIntoView: () => {
+              if (performance.now() - lastUserScrollAtRef.current < 1500) return;
               sentenceRefs.current.get(sentence.id)?.scrollIntoView({
                 block: "center",
                 behavior: "smooth",

@@ -35,7 +35,9 @@ export async function analyzeEpub(blob: Blob, password?: string): Promise<EpubAn
     let totalWords = 0;
     let totalImages = 0;
 
-    for (const entry of htmlEntries) {
+    const YIELD_EVERY = 25;
+    for (let i = 0; i < htmlEntries.length; i += 1) {
+      const entry = htmlEntries[i];
       const reader = (entry as any).getData;
       if (typeof reader !== "function") continue;
       try {
@@ -50,6 +52,10 @@ export async function analyzeEpub(blob: Blob, password?: string): Promise<EpubAn
         totalImages += imageCount;
       } catch {
         /* skip unreadable chapter */
+      }
+      // Yield periodically so the import doesn't block the main thread on big books.
+      if ((i + 1) % YIELD_EVERY === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
