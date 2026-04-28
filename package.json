@@ -1,0 +1,33 @@
+{
+  "name": "online-epub-reader",
+  "version": "1.0.0",
+  "description": "Local-first browser EPUB and TXT reader with ZIP import, translation-friendly reading, and browser-native audio.",
+  "homepage": "https://local-epub-reader.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZeroInfinit12000/online-epub-reader.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "ZeroInfinit12000",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "@zip.js/zip.js": "^2.8.26",
+    "epubjs": "^0.3.93",
+    "localforage": "^1.10.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.14.2"
+  }
+}
