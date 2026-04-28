@@ -14,7 +14,6 @@ import {
   flattenToc,
   formatProgressFromLocations,
   getChapterIndexForLocation,
-  getFragment,
   hrefsMatchFile,
   loadEpubFactory,
 } from "../lib/epub";
@@ -75,7 +74,6 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
   const lastRelocatedCfiRef = useRef<string | null>(book.reading.cfi || null);
   const contentTeardownsRef = useRef<Array<() => void>>([]);
   const lastUserScrollAtRef = useRef<number>(0);
-  const handleInternalLinkClickRef = useRef<((href: string) => void) | null>(null);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState(book.reading.chapterIndex || 0);
   const [progressLabel, setProgressLabel] = useState(
@@ -221,14 +219,10 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
 
       rendition.hooks.content.register((contents: any) => {
         applyReaderStyles(contents, settingsRef.current, getEpubThemeStyles(settingsRef.current));
-        const scrollTeardown = bridgeContentScroll(contents, () => {
+        const teardown = bridgeContentScroll(contents, () => {
           lastUserScrollAtRef.current = performance.now();
         });
-        if (scrollTeardown) contentTeardownsRef.current.push(scrollTeardown);
-        const linkTeardown = configureLinkHandling(contents, (href: string) => {
-          handleInternalLinkClickRef.current?.(href);
-        });
-        if (linkTeardown) contentTeardownsRef.current.push(linkTeardown);
+        if (teardown) contentTeardownsRef.current.push(teardown);
       });
 
       rendition.on("relocated", (location: any) => {
@@ -492,43 +486,6 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
     [clearHighlights, queuePersistReading],
   );
 
-  // Internal-link handler: click <a href="..."> inside the iframe → navigate within the rendition.
-  // Cross-file links resolve to a chapter index when possible (so progress + index update cleanly);
-  // anchor-bearing links go through rendition.display so the iframe scrolls to the fragment.
-  const handleInternalLinkClick = useCallback(
-    (href: string) => {
-      const rendition = renditionRef.current;
-      const epub = epubRef.current;
-      if (!rendition) return;
-
-      const chapters = chaptersRef.current;
-      const fragment = getFragment(href);
-
-      if (!fragment && chapters.length && epub?.spine) {
-        const idx = getChapterIndexForLocation(chapters, epub.spine, href, null);
-        if (idx >= 0) {
-          void displayAt(idx);
-          return;
-        }
-      }
-
-      // Fragment-bearing or unmapped href: defer to rendition.display so the iframe
-      // scrolls to the anchor. The relocated handler then resolves the chapter index.
-      pendingNavigationRef.current = null;
-      activeSearchQueryRef.current = "";
-      try {
-        Promise.resolve(rendition.display(href)).catch(() => {});
-      } catch {
-        /* ignore */
-      }
-    },
-    [displayAt],
-  );
-
-  useEffect(() => {
-    handleInternalLinkClickRef.current = handleInternalLinkClick;
-  }, [handleInternalLinkClick]);
-
   useImperativeHandle(
     ref,
     () => ({
@@ -705,57 +662,6 @@ function bridgeContentScroll(contents: any, onUserScroll?: () => void): (() => v
       contentWindow.removeEventListener("wheel", noteUserInput);
       contentWindow.removeEventListener("touchstart", noteUserInput);
       contentWindow.removeEventListener("keydown", noteUserInput);
-    } catch {
-      /* ignore */
-    }
-  };
-}
-
-function configureLinkHandling(
-  contents: any,
-  onInternalCrossFile: (href: string) => void,
-): (() => void) | null {
-  const doc = contents?.document as Document | undefined;
-  if (!doc) return null;
-
-  const handler = (event: MouseEvent) => {
-    // Modifier-clicks (Ctrl/Cmd/Shift/middle-click) — let the browser decide.
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-      return;
-    }
-    const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-    if (!anchor) return;
-
-    const rawHref = anchor.getAttribute("href") || "";
-    if (!rawHref) return;
-
-    // External: open in a new tab so we never blow away the rendition.
-    if (/^(?:https?:|mailto:|tel:|ftp:)/i.test(rawHref)) {
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        window.open(rawHref, "_blank", "noopener,noreferrer");
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
-    // Pure fragment within the current chapter — let the iframe scroll natively.
-    if (rawHref.startsWith("#")) return;
-
-    // Cross-file internal navigation.
-    event.preventDefault();
-    event.stopPropagation();
-    onInternalCrossFile(rawHref);
-  };
-
-  // Capture phase so we run before epub.js's own link handler (which would otherwise treat
-  // every href as a relative spine path, including external ones).
-  doc.addEventListener("click", handler, true);
-  return () => {
-    try {
-      doc.removeEventListener("click", handler, true);
     } catch {
       /* ignore */
     }
