@@ -64,6 +64,7 @@ export interface EpubBook extends LibraryBookBase {
   type: "epub";
   /** Map of normalized file href → image count for the file. Used to flag chapters with images. */
   chapterImagesByHref?: Record<string, number>;
+  analysisStatus?: "pending" | "complete" | "skipped";
   reading: {
     cfi: string | null;
     href: string | null;

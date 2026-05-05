@@ -663,7 +663,7 @@ export function ReaderPage() {
                   className="chapter-image-pill"
                   aria-label={imageBadge ? `${imageBadge} image${imageBadge === 1 ? "" : "s"} in this chapter` : "Contains images"}
                 >
-                  <span aria-hidden="true">🖼</span>
+                  <span className="chapter-image-icon" aria-hidden="true" />
                   {imageBadge && imageBadge > 1 ? <span className="chapter-image-count">{imageBadge}</span> : null}
                 </span>
               ) : null}

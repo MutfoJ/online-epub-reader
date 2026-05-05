@@ -10,6 +10,8 @@ import {
 } from "react";
 
 import { importBooksFromFiles } from "../lib/importBooks";
+import { analyzeEpub } from "../lib/epubAnalysis";
+import { requestIdleWork } from "../lib/performance";
 import {
   ensurePersistentStorage,
   getBookBlob,
@@ -96,6 +98,58 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     await saveLibraryMeta(nextBooks);
   }, []);
 
+  const enqueueDeferredEpubAnalysis = useCallback(
+    (entries: LibraryBook[]) => {
+      const pending = entries.filter(
+        (book): book is Extract<LibraryBook, { type: "epub" }> =>
+          book.type === "epub" && book.analysisStatus === "pending",
+      );
+      if (!pending.length) return;
+
+      requestIdleWork(() => {
+        void (async () => {
+          for (const importedBook of pending) {
+            const current = booksRef.current.find((book) => book.id === importedBook.id);
+            if (!current || current.type !== "epub" || current.analysisStatus !== "pending") continue;
+
+            try {
+              const blob = await getBookBlob(current.id);
+              if (!blob) continue;
+              const analysis = await analyzeEpub(blob);
+              const nextBook: LibraryBook = {
+                ...current,
+                coverDataUrl: current.coverDataUrl ?? analysis.coverDataUrl,
+                stats: analysis.stats,
+                chapterImagesByHref: Object.keys(analysis.chapterImagesByHref).length
+                  ? analysis.chapterImagesByHref
+                  : current.chapterImagesByHref,
+                analysisStatus: "complete",
+              };
+              const nextBooks = sortBooks(
+                booksRef.current.map((entry) => (entry.id === nextBook.id ? nextBook : entry)),
+              );
+              booksRef.current = nextBooks;
+              setBooks(nextBooks);
+              await saveLibraryMeta(nextBooks);
+            } catch {
+              const latest = booksRef.current.find((book) => book.id === importedBook.id);
+              if (!latest || latest.type !== "epub") continue;
+              const nextBooks = sortBooks(
+                booksRef.current.map((entry) =>
+                  entry.id === latest.id ? { ...latest, analysisStatus: "skipped" } : entry,
+                ),
+              );
+              booksRef.current = nextBooks;
+              setBooks(nextBooks);
+              await saveLibraryMeta(nextBooks);
+            }
+          }
+        })();
+      });
+    },
+    [sortBooks],
+  );
+
   const importFiles = useCallback(
     async (files: File[], password?: string) => {
       setImportError(false);
@@ -109,6 +163,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
         const nextBooks = sortBooks([...imported, ...booksRef.current]);
         await persistBooks(nextBooks);
+        enqueueDeferredEpubAnalysis(imported);
         setImportStatus(`Imported ${imported.length} book(s).`);
         return imported.map((book) => book.id);
       } catch (error) {
@@ -118,7 +173,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         return [];
       }
     },
-    [persistBooks, sortBooks],
+    [enqueueDeferredEpubAnalysis, persistBooks, sortBooks],
   );
 
   const deleteBook = useCallback(

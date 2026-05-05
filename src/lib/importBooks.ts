@@ -11,26 +11,27 @@ import {
   splitTxtIntoSections,
   statsForTxt,
 } from "./helpers";
+import { getImportConcurrency, shouldDeferEpubAnalysis } from "./performance";
 import { storeBookBlob } from "./storage";
 
 export async function importBooksFromFiles(files: File[], password?: string): Promise<LibraryBook[]> {
-  const importedBooks: LibraryBook[] = [];
-  for (const file of files) {
-    const extracted = await extractBooksFromFile(file, password);
-    importedBooks.push(...extracted);
-  }
+  const importConcurrency = getImportConcurrency();
+  const extracted = await mapLimit(files, importConcurrency, (file) =>
+    extractBooksFromFile(file, password),
+  );
+  const importedBooks = dedupeLibrary(extracted.flat());
 
   await assertEnoughBrowserStorage(importedBooks);
 
-  for (const book of importedBooks) {
+  await mapLimit(importedBooks, importConcurrency, async (book) => {
     const blob = (book as LibraryBook & { fileBlob?: Blob }).fileBlob;
     if (blob) {
       await storeBookBlob(book.id, blob);
       delete (book as LibraryBook & { fileBlob?: Blob }).fileBlob;
     }
-  }
+  });
 
-  return dedupeLibrary(importedBooks);
+  return importedBooks;
 }
 
 async function extractBooksFromFile(file: File, password?: string): Promise<LibraryBook[]> {
@@ -52,37 +53,31 @@ async function extractBooksFromZip(file: File, password: string | undefined, sou
 
   try {
     const entries = await zipReader.getEntries();
-    const books: LibraryBook[] = [];
-
-    for (const entry of entries) {
-      if (entry.directory) {
-        continue;
-      }
-
+    const supportedEntries = entries.filter((entry) => {
+      if (entry.directory) return false;
       const name = entry.filename.toLowerCase();
-      if (!(name.endsWith(".epub") || name.endsWith(".txt") || name.endsWith(".zip"))) {
-        continue;
-      }
+      return name.endsWith(".epub") || name.endsWith(".txt") || name.endsWith(".zip");
+    });
 
-      const blob = await entry.getData(new BlobWriter(), password ? { password } : {});
+    const books = await mapLimit(supportedEntries, getImportConcurrency(), async (entry) => {
+      const name = entry.filename.toLowerCase();
+      const blob = await (entry as any).getData(new BlobWriter(), password ? { password } : {});
       const nestedFile = new File([blob], entry.filename.split("/").pop() || entry.filename, {
         type: blob.type || guessMimeFromName(entry.filename),
       });
 
       if (name.endsWith(".zip")) {
-        const nested = await extractBooksFromZip(nestedFile, password, `${sourceName} > ${entry.filename}`);
-        books.push(...nested);
-        continue;
+        return extractBooksFromZip(nestedFile, password, `${sourceName} > ${entry.filename}`);
       }
 
-      books.push(
+      return [
         await buildBookRecord(nestedFile, name.endsWith(".epub") ? "epub" : "txt", {
           sourceLabel: `${sourceName} > ${entry.filename}`,
         }),
-      );
-    }
+      ];
+    });
 
-    return books;
+    return books.flat();
   } catch (error) {
     if (String((error as Error)?.message || "").toLowerCase().includes("password")) {
       throw new Error(
@@ -134,15 +129,18 @@ async function buildBookRecord(
   let coverDataUrl: string | null = null;
   let chapterImagesByHref: Record<string, number> | undefined;
   let stats = buildBookStats(0, 0, 0);
-  try {
-    const analysis = await analyzeEpub(blob);
-    coverDataUrl = analysis.coverDataUrl;
-    if (Object.keys(analysis.chapterImagesByHref).length) {
-      chapterImagesByHref = analysis.chapterImagesByHref;
+  const deferAnalysis = shouldDeferEpubAnalysis(blob.size);
+  if (!deferAnalysis) {
+    try {
+      const analysis = await analyzeEpub(blob);
+      coverDataUrl = analysis.coverDataUrl;
+      if (Object.keys(analysis.chapterImagesByHref).length) {
+        chapterImagesByHref = analysis.chapterImagesByHref;
+      }
+      stats = analysis.stats;
+    } catch {
+      /* ignore analysis errors */
     }
-    stats = analysis.stats;
-  } catch {
-    /* ignore analysis errors */
   }
 
   const book: EpubBook & { fileBlob?: Blob } = {
@@ -158,6 +156,7 @@ async function buildBookRecord(
     coverDataUrl,
     stats,
     chapterImagesByHref,
+    analysisStatus: deferAnalysis ? "pending" : "complete",
     reading: {
       cfi: null,
       href: null,
@@ -213,4 +212,29 @@ export async function persistBookBlob(bookId: string, blob: Blob): Promise<void>
     }
     throw error;
   }
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index], index);
+        if ((index + 1) % 12 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    }),
+  );
+
+  return results;
 }

@@ -438,6 +438,8 @@ p {
   border: 1px solid rgba(255, 255, 255, 0.22);
   box-shadow: 0 12px 30px rgba(25, 45, 64, 0.08);
   transition: transform 160ms ease, box-shadow 160ms ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 360px;
 }
 
 .book-card-v2:hover {
@@ -731,6 +733,36 @@ p {
   font-family: var(--font-ui);
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.chapter-image-icon {
+  position: relative;
+  width: 14px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+
+.chapter-image-icon::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chapter-image-icon::after {
+  content: "";
+  position: absolute;
+  right: 1.5px;
+  bottom: 1.5px;
+  width: 7px;
+  height: 5px;
+  background: currentColor;
+  clip-path: polygon(0 100%, 38% 36%, 58% 64%, 76% 28%, 100% 100%);
 }
 
 .chapter-row.is-active .chapter-image-pill {
@@ -1364,6 +1396,65 @@ button:disabled {
 
 .status.error {
   color: #b13434;
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+  body {
+    background: linear-gradient(160deg, var(--bg-0), var(--bg-1));
+  }
+
+  .library-hero,
+  .library-panel,
+  .panel-card,
+  .reader-surface,
+  .audio-status-card,
+  .excerpt-card {
+    backdrop-filter: none;
+    box-shadow: 0 8px 22px rgba(25, 45, 64, 0.08);
+  }
+
+  .reader-shell-header {
+    backdrop-filter: none;
+    box-shadow: 0 8px 20px rgba(18, 41, 63, 0.06);
+    will-change: auto;
+  }
+
+  .book-card-v2,
+  .book-cover,
+  .book-info-modal,
+  .book-info-cover {
+    box-shadow: none;
+  }
+
+  .book-info-backdrop {
+    backdrop-filter: none;
+  }
+
+  .primary-button,
+  .soft-button,
+  .chip-button,
+  .book-delete,
+  .chapter-row,
+  .dropzone,
+  .filter-chip,
+  .book-card-v2,
+  .reader-shell-header,
+  .mobile-panel-sheet,
+  .mobile-panel-backdrop {
+    transition-duration: 80ms;
+  }
+
+  .primary-button:hover,
+  .soft-button:hover,
+  .chip-button:hover,
+  .book-delete:hover,
+  .chapter-row:hover,
+  .search-result-row:hover,
+  .chapter-summary-button:hover,
+  .book-card-v2:hover,
+  .dropzone.is-drag {
+    transform: none;
+  }
 }
 
 @media (min-width: 860px) {

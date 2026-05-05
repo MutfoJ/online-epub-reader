@@ -140,11 +140,12 @@ export function LibraryPage() {
           chapterImagesByHref:
             (book as EpubBook).chapterImagesByHref ||
             (Object.keys(analysis.chapterImagesByHref).length ? analysis.chapterImagesByHref : undefined),
+          analysisStatus: "complete",
         };
         await updateBook(next);
         return next;
       } catch {
-        const fallback: LibraryBook = { ...book, stats: book.stats || buildBookStats(0, 0, 0) };
+        const fallback: LibraryBook = { ...book, stats: book.stats || buildBookStats(0, 0, 0), analysisStatus: "skipped" };
         await updateBook(fallback);
         return fallback;
       }

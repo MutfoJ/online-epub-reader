@@ -76,11 +76,10 @@ export function buildChaptersFromSpine(
   const items = spine?.items || [];
   const spineByHref = buildSpineLookup(spine);
   const navEntries = buildTocNavigation(flatToc, spine, spineByHref);
+  const imageLookup = buildImageHrefLookup(imagesByHref);
 
   const annotate = (entry: ChapterEntry): ChapterEntry => {
-    if (!imagesByHref) return entry;
-    const lookupKey = normalizeFileHref(entry.href || entry.key);
-    const count = imagesByHref[lookupKey];
+    const count = imageLookup(entry.href || entry.key);
     if (!count) return entry;
     return { ...entry, hasImages: true, imageCount: count };
   };
@@ -98,6 +97,38 @@ export function buildChaptersFromSpine(
       label: `${index + 1}. ${item.idref || `Chapter ${index + 1}`}`,
     });
   });
+}
+
+function buildImageHrefLookup(imagesByHref?: Record<string, number> | null): (href: string | null | undefined) => number {
+  if (!imagesByHref) return () => 0;
+
+  const suffixes = new Map<string, { href: string; count: number } | null>();
+  for (const [rawHref, count] of Object.entries(imagesByHref)) {
+    const normalized = normalizeFileHref(rawHref);
+    if (!normalized || !count) continue;
+
+    const parts = normalized.split("/").filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const suffix = parts.slice(index).join("/");
+      const previous = suffixes.get(suffix);
+      if (previous === undefined) {
+        suffixes.set(suffix, { href: normalized, count });
+      } else if (previous?.href !== normalized) {
+        suffixes.set(suffix, null);
+      }
+    }
+  }
+
+  return (href) => {
+    const normalized = normalizeFileHref(href);
+    if (!normalized) return 0;
+    const parts = normalized.split("/").filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const match = suffixes.get(parts.slice(index).join("/"));
+      if (match) return match.count;
+    }
+    return 0;
+  };
 }
 
 function buildTocNavigation(

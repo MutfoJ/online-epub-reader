@@ -17,8 +17,10 @@ import {
   getFragment,
   hrefsMatchFile,
   loadEpubFactory,
+  normalizeFileHref,
 } from "../lib/epub";
 import { normalizeSpeechText, splitParagraphIntoSentences, stripHtml } from "../lib/helpers";
+import { getAnalysisConcurrency, getDevicePerformanceProfile } from "../lib/performance";
 import { loadEpubLocations, saveEpubLocations } from "../lib/storage";
 import type { ChapterEntry, EpubBook, ReaderHandle, ReaderSettings, SearchResult, SpeechSource } from "../types";
 
@@ -651,7 +653,7 @@ async function waitForRenditionContents(rendition: any): Promise<boolean> {
     const contents = rendition?.getContents?.() || [];
     const hasReadableBody = contents.some((content: any) => {
       const body = content?.document?.body;
-      return Boolean(body && (body.innerText || body.textContent || "").trim());
+      return Boolean(body && (body.textContent || "").trim());
     });
     if (hasReadableBody) return true;
     await new Promise((resolve) => window.setTimeout(resolve, 80));
@@ -834,7 +836,9 @@ async function hydrateLocations(epub: any, bookId: string, fileSize: number): Pr
       /* fall through and regenerate */
     }
   }
-  if (fileSize <= 40 * 1024 * 1024 && typeof epub.locations.generate === "function") {
+  const profile = getDevicePerformanceProfile();
+  const maxGeneratedSize = profile.constrained ? 12 * 1024 * 1024 : 40 * 1024 * 1024;
+  if (fileSize <= maxGeneratedSize && typeof epub.locations.generate === "function") {
     try {
       await epub.locations.generate(1200);
       const serialized = typeof epub.locations.save === "function" ? epub.locations.save() : null;
@@ -856,53 +860,105 @@ async function buildSearchCache(
   chapters: ChapterEntry[],
 ): Promise<NonNullable<typeof searchCacheChapters>> {
   const reader = new ZipReader(new BlobReader(fileBlob));
-  const built: NonNullable<typeof searchCacheChapters> = [];
   try {
     const entries = await reader.getEntries();
-    const entryByPath = new Map<string, any>();
-    for (const entry of entries) {
-      if (!entry.directory) {
-        entryByPath.set(entry.filename.replace(/\\/g, "/").toLowerCase(), entry);
-      }
-    }
-    const lookupEntry = (href: string) => {
-      const target = href.split("#")[0].replace(/\\/g, "/").replace(/^\.?\//, "").toLowerCase();
-      const direct = entryByPath.get(target);
-      if (direct) return direct;
-      for (const [filename, entry] of entryByPath) {
-        if (filename === target || filename.endsWith(`/${target}`)) return entry;
-      }
-      return null;
-    };
+    const lookupEntry = buildZipEntryLookup(entries);
+    const uniqueChapterFiles: Array<{ chapter: ChapterEntry; index: number; href: string; entry: any }> = [];
+    const seenFiles = new Set<string>();
 
     for (let i = 0; i < chapters.length; i += 1) {
       const chapter = chapters[i];
       const href = chapter.href || chapter.key;
       const entry = lookupEntry(href);
       if (!entry?.getData) continue;
+      const fileKey = normalizeFileHref(entry.filename || href);
+      if (!fileKey || seenFiles.has(fileKey)) continue;
+      seenFiles.add(fileKey);
+      uniqueChapterFiles.push({ chapter, index: i, href, entry });
+    }
+
+    const built = await mapLimit(uniqueChapterFiles, getAnalysisConcurrency(), async ({ chapter, index, href, entry }) => {
       try {
         const raw = await entry.getData(new TextWriter());
         const text = normalizeSpeechText(stripHtml(raw));
-        if (!text) continue;
-        built.push({
-          index: i,
+        if (!text) return null;
+        return {
+          index,
           href,
           label: chapter.label.replace(/^\d+\.\s*/, ""),
           text,
           lowerText: text.toLowerCase(),
-        });
+        };
       } catch {
-        /* skip unreadable */
+        return null;
       }
-      // Yield every 25 chapters so a giant book doesn't freeze the UI.
-      if ((i + 1) % 25 === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
+    });
+
+    return built
+      .filter((entry): entry is NonNullable<(typeof built)[number]> => Boolean(entry))
+      .sort((left, right) => left.index - right.index);
   } finally {
     await reader.close().catch(() => {});
   }
-  return built;
+}
+
+function buildZipEntryLookup(entries: any[]): (href: string) => any | null {
+  const suffixes = new Map<string, any | null>();
+
+  for (const entry of entries) {
+    if (entry.directory) continue;
+    const normalized = normalizeFileHref(entry.filename);
+    if (!normalized) continue;
+
+    const parts = normalized.split("/").filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const suffix = parts.slice(index).join("/");
+      const previous = suffixes.get(suffix);
+      if (previous === undefined) {
+        suffixes.set(suffix, entry);
+      } else if (previous !== entry) {
+        suffixes.set(suffix, null);
+      }
+    }
+  }
+
+  return (href) => {
+    const normalized = normalizeFileHref(href);
+    const parts = normalized.split("/").filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const match = suffixes.get(parts.slice(index).join("/"));
+      if (match) return match;
+    }
+    return null;
+  };
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!items.length) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  let completed = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index], index);
+        completed += 1;
+        if (completed % 12 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    }),
+  );
+
+  return results;
 }
 
 async function searchEpubBlob(
@@ -949,7 +1005,7 @@ function buildSpeechCandidates(root: HTMLElement): EpubSpeechCandidate[] {
   return [...root.querySelectorAll<HTMLElement>(selectors)]
     .filter((block) => !block.querySelector(selectors))
     .map((block, blockIndex) => {
-      const text = normalizeSpeechText(block.innerText || block.textContent || "");
+      const text = normalizeSpeechText(block.textContent || "");
       if (!text) return [];
       return splitParagraphIntoSentences(text).map((sentence, sentenceIndex) => ({
         id: `epub-segment-${blockIndex}-${sentenceIndex}`,

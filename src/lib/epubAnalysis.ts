@@ -2,6 +2,7 @@ import { BlobReader, BlobWriter, TextWriter, ZipReader } from "@zip.js/zip.js";
 
 import { buildBookStats, countWords, stripHtml } from "./helpers";
 import { normalizeFileHref } from "./epub";
+import { getAnalysisConcurrency, getDevicePerformanceProfile } from "./performance";
 import type { BookStats } from "../types";
 
 export interface EpubAnalysis {
@@ -14,36 +15,43 @@ const COVER_NAME_PATTERN = /(?:^|\/)(cover|titlepage|frontcover)[^/]*\.(jpe?g|pn
 const IMAGE_PATTERN = /\.(jpe?g|png|webp|gif|bmp|svg)$/i;
 const HTML_PATTERN = /\.(x?html?|htm)$/i;
 const COVER_MAX_WIDTH = 360;
-const ANALYSIS_MAX_BYTES = 80 * 1024 * 1024; // skip deep analysis for very large EPUBs
+const MOBILE_COVER_MAX_WIDTH = 220;
+const WORD_ANALYSIS_MAX_BYTES = 80 * 1024 * 1024;
+const COVER_ANALYSIS_MAX_BYTES = 140 * 1024 * 1024;
+const CONSTRAINED_COVER_ANALYSIS_MAX_BYTES = 35 * 1024 * 1024;
+const CONSTRAINED_WORD_ANALYSIS_MAX_BYTES = 14 * 1024 * 1024;
+const CHAPTER_WORD_ANALYSIS_MAX_BYTES = 3 * 1024 * 1024;
 
 export async function analyzeEpub(blob: Blob, password?: string): Promise<EpubAnalysis> {
-  const empty: EpubAnalysis = {
-    coverDataUrl: null,
-    stats: buildBookStats(0, 0, 0),
-    chapterImagesByHref: {},
-  };
-  if (blob.size > ANALYSIS_MAX_BYTES) return empty;
-
   const reader = new ZipReader(new BlobReader(blob), { password });
   try {
     const entries = await reader.getEntries();
+    const profile = getDevicePerformanceProfile();
+    const coverLimit = profile.constrained ? CONSTRAINED_COVER_ANALYSIS_MAX_BYTES : COVER_ANALYSIS_MAX_BYTES;
+    const coverWidth = profile.constrained ? MOBILE_COVER_MAX_WIDTH : COVER_MAX_WIDTH;
+    const wordLimit = profile.constrained ? CONSTRAINED_WORD_ANALYSIS_MAX_BYTES : WORD_ANALYSIS_MAX_BYTES;
 
-    const coverDataUrl = await extractCover(entries, password).catch(() => null);
+    const coverDataUrl =
+      blob.size <= coverLimit
+        ? await extractCover(entries, coverWidth, password).catch(() => null)
+        : null;
 
     const htmlEntries = entries.filter((entry) => !entry.directory && HTML_PATTERN.test(entry.filename));
     const chapterImagesByHref: Record<string, number> = {};
     let totalWords = 0;
     let totalImages = 0;
+    const countWordsForBook = blob.size <= wordLimit;
 
-    const YIELD_EVERY = 25;
-    for (let i = 0; i < htmlEntries.length; i += 1) {
-      const entry = htmlEntries[i];
-      const reader = (entry as any).getData;
-      if (typeof reader !== "function") continue;
+    await mapLimit(htmlEntries, getAnalysisConcurrency(), async (entry) => {
+      if (typeof (entry as any).getData !== "function") return;
       try {
         const raw = await (entry as any).getData(new TextWriter(), password ? { password } : {});
-        const parsed = parseChapterDocument(raw);
-        if (!parsed) continue;
+        const parsed = parseChapterDocument(raw, {
+          countWords:
+            countWordsForBook &&
+            Number((entry as any).uncompressedSize || raw.length || 0) <= CHAPTER_WORD_ANALYSIS_MAX_BYTES,
+        });
+        if (!parsed) return;
         const { wordCount, imageCount } = parsed;
         if (imageCount) {
           chapterImagesByHref[normalizeFileHref(entry.filename)] = imageCount;
@@ -53,11 +61,7 @@ export async function analyzeEpub(blob: Blob, password?: string): Promise<EpubAn
       } catch {
         /* skip unreadable chapter */
       }
-      // Yield periodically so the import doesn't block the main thread on big books.
-      if ((i + 1) % YIELD_EVERY === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
+    });
 
     return {
       coverDataUrl,
@@ -69,7 +73,7 @@ export async function analyzeEpub(blob: Blob, password?: string): Promise<EpubAn
   }
 }
 
-async function extractCover(entries: any[], password?: string): Promise<string | null> {
+async function extractCover(entries: any[], maxWidth: number, password?: string): Promise<string | null> {
   const named = entries.find(
     (entry) => !entry.directory && COVER_NAME_PATTERN.test(entry.filename),
   );
@@ -81,7 +85,7 @@ async function extractCover(entries: any[], password?: string): Promise<string |
 
   try {
     const imageBlob = await (target as any).getData(new BlobWriter(), password ? { password } : {});
-    return await blobToCappedDataUrl(imageBlob, COVER_MAX_WIDTH);
+    return await blobToCappedDataUrl(imageBlob, maxWidth);
   } catch {
     return null;
   }
@@ -91,12 +95,39 @@ async function extractCover(entries: any[], password?: string): Promise<string |
 // text. Avoids the per-chapter DOMParser allocation that dominated import time on big EPUBs.
 const IMAGE_TAG_PATTERN = /<(?:img|image|svg)\b/gi;
 
-function parseChapterDocument(raw: string): { wordCount: number; imageCount: number } | null {
+function parseChapterDocument(
+  raw: string,
+  options: { countWords: boolean },
+): { wordCount: number; imageCount: number } | null {
   if (!raw) return null;
   let imageCount = 0;
   for (const _ of raw.matchAll(IMAGE_TAG_PATTERN)) imageCount += 1;
-  const text = stripHtml(raw);
-  return { wordCount: countWords(text), imageCount };
+  if (!options.countWords) return { wordCount: 0, imageCount };
+  return { wordCount: countWords(stripHtml(raw)), imageCount };
+}
+
+async function mapLimit<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  let completed = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        await worker(items[index], index);
+        completed += 1;
+        if (completed % 16 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    }),
+  );
 }
 
 async function blobToCappedDataUrl(blob: Blob, maxWidth: number): Promise<string | null> {
