@@ -83,6 +83,9 @@ export function ReaderPage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchStatus, setSearchStatus] = useState("Search the current book.");
   const [searching, setSearching] = useState(false);
+  const [wideReaderLayout, setWideReaderLayout] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1180px)").matches : false,
+  );
 
   const togglePanel = useCallback((name: Exclude<PanelName, null>) => {
     setPanel((current) => (current === name ? null : name));
@@ -180,6 +183,16 @@ export function ReaderPage() {
   useEffect(() => {
     if (panel) setHeaderHidden(false);
   }, [panel]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1180px)");
+    const update = () => setWideReaderLayout(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => {
+      query.removeEventListener?.("change", update);
+    };
+  }, []);
 
   // Clear lingering search highlights as soon as the search panel closes so they don't
   // re-appear when the user moves between chapters or starts audio.
@@ -606,7 +619,7 @@ export function ReaderPage() {
         .filter(({ entry }) => entry.label.toLowerCase().includes(filterNeedle))
     : sectionEntries.map((entry, index) => ({ entry, index }));
 
-  const chaptersPanelContent = (
+  const renderChaptersPanelContent = () => (
     <ReaderPanelCard eyebrow="Navigation" title="Contents" onClose={() => setPanel(null)}>
       {sectionEntries.length > 12 ? (
         <div className="chapter-filter">
@@ -1013,7 +1026,9 @@ export function ReaderPage() {
       </header>
 
       <main className="reader-main">
-        <aside className="reader-side-panel reader-side-panel-left">{chaptersPanelContent}</aside>
+        <aside className="reader-side-panel reader-side-panel-left">
+          {wideReaderLayout ? renderChaptersPanelContent() : null}
+        </aside>
 
         <section className="reader-stage-shell">
           {blockingError ? (
@@ -1064,7 +1079,7 @@ export function ReaderPage() {
         aria-label="Reader panel"
       >
         {panel === "chapters"
-          ? chaptersPanelContent
+          ? renderChaptersPanelContent()
           : panel === "search"
             ? searchPanelContent
           : panel === "audio"

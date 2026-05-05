@@ -85,6 +85,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
   );
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const performanceProfile = useMemo(() => getDevicePerformanceProfile(), []);
 
   const themeStyles = useMemo(() => getEpubThemeStyles(settings), [settings]);
 
@@ -303,7 +304,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
       });
 
       // Restore or generate the locations index.
-      void hydrateLocations(epub, latestBookRef.current.id, fileBlob.size).catch(() => {});
+      void hydrateLocations(epub, latestBookRef.current.id, fileBlob.size, performanceProfile).catch(() => {});
 
       const startBook = latestBookRef.current;
       const startIndex = Math.max(0, Math.min(nextChapters.length - 1, startBook.reading.chapterIndex || 0));
@@ -355,7 +356,7 @@ export const EpubReader = forwardRef<ReaderHandle, EpubReaderProps>(function Epu
       flushPersistTimer();
     };
     // Intentionally narrow: theme/style changes do NOT remount the rendition.
-  }, [book.id, fileBlob, settings.flow, flushPersistTimer, queuePersistReading]);
+  }, [book.id, fileBlob, settings.flow, flushPersistTimer, performanceProfile, queuePersistReading]);
 
   // Re-apply styles in place whenever theme/typography changes, without rebuilding the rendition.
   // Snapshot iframe scroll position before the style mutation so reflow doesn't visibly jump.
@@ -825,7 +826,12 @@ function clearSearchHighlights(doc: Document): void {
   });
 }
 
-async function hydrateLocations(epub: any, bookId: string, fileSize: number): Promise<void> {
+async function hydrateLocations(
+  epub: any,
+  bookId: string,
+  fileSize: number,
+  profile = getDevicePerformanceProfile(),
+): Promise<void> {
   if (!epub.locations || typeof epub.locations.load !== "function") return;
   const cached = await loadEpubLocations(bookId);
   if (cached) {
@@ -836,7 +842,7 @@ async function hydrateLocations(epub: any, bookId: string, fileSize: number): Pr
       /* fall through and regenerate */
     }
   }
-  const profile = getDevicePerformanceProfile();
+  if (profile.constrained) return;
   const maxGeneratedSize = profile.constrained ? 12 * 1024 * 1024 : 40 * 1024 * 1024;
   if (fileSize <= maxGeneratedSize && typeof epub.locations.generate === "function") {
     try {

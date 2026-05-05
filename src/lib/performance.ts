@@ -36,7 +36,7 @@ export function getAnalysisConcurrency(): number {
 export function shouldDeferEpubAnalysis(fileSize: number): boolean {
   const profile = getDevicePerformanceProfile();
   if (!profile.constrained) return false;
-  return fileSize >= 18 * 1024 * 1024;
+  return fileSize >= 2 * 1024 * 1024 || profile.mobileLike;
 }
 
 export function requestIdleWork(task: () => void, timeout = 12000): void {
