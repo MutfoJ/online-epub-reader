@@ -595,6 +595,11 @@ export function ReaderPage() {
     (book.type === "txt"
       ? `${currentSectionIndex + 1}. ${book.sections[currentSectionIndex]?.label || "Section"}`
       : "Chapters");
+  const currentSectionEntry = sectionEntries[currentSectionIndex] || null;
+  const currentSectionImageCount =
+    currentSectionEntry?.imageCount && currentSectionEntry.imageCount > 0
+      ? currentSectionEntry.imageCount
+      : null;
   const audioPanelOpen = panel === "audio";
   const searchPanelOpen = panel === "search";
   const settingsPanelOpen = panel === "settings";
@@ -1006,7 +1011,24 @@ export function ReaderPage() {
               aria-label="Open chapter list"
               aria-expanded={panel === "chapters"}
             >
-              <strong>{truncateText(chapterSummary, 42)}</strong>
+              <strong className="chapter-summary-title">
+                {currentSectionEntry?.hasImages ? (
+                  <span
+                    className="chapter-summary-image-pill"
+                    aria-label={
+                      currentSectionImageCount
+                        ? `${currentSectionImageCount} image${currentSectionImageCount === 1 ? "" : "s"} in this chapter`
+                        : "Contains images"
+                    }
+                  >
+                    <span className="chapter-image-icon" aria-hidden="true" />
+                    {currentSectionImageCount && currentSectionImageCount > 1 ? (
+                      <span className="chapter-image-count">{currentSectionImageCount}</span>
+                    ) : null}
+                  </span>
+                ) : null}
+                <span>{truncateText(chapterSummary, 42)}</span>
+              </strong>
               <span>{!readerReady ? "Loading..." : isNavigatingSection ? "Moving..." : progressLabel}</span>
             </button>
 

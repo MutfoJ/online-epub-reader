@@ -1059,6 +1059,27 @@ p {
   font-size: 0.93rem;
 }
 
+.chapter-summary-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.chapter-summary-title > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-summary-image-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+}
+
 .chapter-summary-button span {
   color: var(--text-soft);
   font-family: var(--font-ui);
@@ -1604,6 +1625,18 @@ button:disabled {
   .chapter-summary-button {
     padding-left: 10px;
     padding-right: 10px;
+  }
+
+  .mobile-panel-sheet .chapter-image-pill {
+    min-width: 30px;
+    justify-content: center;
+    padding: 4px 7px;
+  }
+
+  .chapter-summary-image-pill .chapter-image-icon,
+  .mobile-panel-sheet .chapter-image-icon {
+    width: 15px;
+    height: 13px;
   }
 
   .reader-main {
